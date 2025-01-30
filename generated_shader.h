@@ -1,3 +1,7 @@
+#ifndef GENERATED_HEADER_H
+#define GENERATED_HEADER_H
+
+const char shader_content[] = R"raw(
 float4x4 compute_view_matrix(float3 _position_camera, float3 _view_point) {
 
 	float3 up = { 0.0f,1.0f,0.0f };
@@ -44,7 +48,7 @@ int height;
 
 #define TIME 0.1*frame
 
-static float4x4 view_matrix = compute_view_matrix(float3(0.0,3.0,6.0), float3(0.0,0.0,0.0));
+static float4x4 view_matrix = compute_view_matrix(float3(0.0,10.0,20.0), float3(0.0,0.0,0.0));
 static float4x4 projection_matrix = compute_perspective_matrix(1.0,1.6,0.1,50.0);
 
 struct VS_INPUT {
@@ -64,7 +68,12 @@ VS_OUTPUT vs_main(VS_INPUT i)
     VS_OUTPUT o;
 
     float4 local_pos = float4(i.position,1.0);
+
+	float angle = 0.1 * i.instanceid;
+
     local_pos.xz = mul( float2x2( cos(TIME), sin(TIME), -sin(TIME), cos(TIME) ), local_pos.xz );
+	local_pos.xyz += 10.0 * float3( cos( angle ), 0.0, sin(angle) );
+
 
     o.position = mul( float4( local_pos.xyz, 1.0 ), view_matrix );
     o.position = mul( o.position, projection_matrix );
@@ -85,3 +94,6 @@ void plain_color_cs(uint3 id: SV_DispatchThreadID )
 {
     g_rwtTexture0[ id.xy ] = float3( 1.0 * id.x / width, 1.0 * id.y / height, 0.0 );
 }
+)raw";
+
+#endif // GENERATED_HEADER_H
