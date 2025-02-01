@@ -4,18 +4,49 @@
 static int frame = 0;
 static D3D11_BUFFER_DESC constant_buffer_desc = { 256, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0 }; // 256,0,4,0,0,0
 
-ID3D11ComputeShader* cs_plain_color = NULL;
-ID3D11VertexShader* vs_standard = NULL;
-ID3D11PixelShader* ps_standard = NULL;
+CShader* cs_plain_color = NULL;
+VShader* vs_standard = NULL;
+PShader* ps_standard = NULL;
 
-Mesh* pMeshCube;
+Mesh* mesh_cube;
+Buffer* other_buffer;
+RenderTarget2D* other_render;
+
+//Constants buffer helper functions
+void set_cb_framecount(float frame)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[0] = frame;
+    constants_buffer->unmap();
+}
+
+void set_cb_rendersize(float x, float y)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[1] = x;
+    cb[2] = y;
+    constants_buffer->unmap();
+}
+
+
+void set_cb_position(float x, float y, float z)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[4] = x;
+    cb[5] = y;
+    cb[6] = z;
+    constants_buffer->unmap();
+}
 
 void preparation()
 {
     //Create vertex layout
     ID3D11VertexShader* vs = nullptr;
     ID3DBlob* inputlayoutsignature;
-    D3DCompile(shader_input_layout_signature, sizeof(shader_input_layout_signature), 0, 0, 0, "vertex_input_layout_signature", "vs_5_0", D3D10_SHADER_DEBUG, 0, &inputlayoutsignature, nullptr);
+    D3DCompile(shader_vertex_input_layout_signature, sizeof(shader_vertex_input_layout_signature), 0, 0, 0, "vertex_input_layout_signature", "vs_5_0", D3D10_SHADER_DEBUG, 0, &inputlayoutsignature, nullptr);
 
     device->CreateVertexShader((void*)(((int*)inputlayoutsignature)[3]), ((int*)inputlayoutsignature)[2], NULL, &vs);
 
@@ -66,30 +97,27 @@ void preparation()
 
     allocation(maindepth_texture, RenderDepth2D, width_window, height_window);
 
-    cs_plain_color = CompileComputeShader("plain_color_cs");
-    vs_standard = CompileVertexShader("vs_main");
-    ps_standard = CompilePixelShader("ps_main");
+    allocation(other_buffer, Buffer, 100, 16);
+    allocation(other_render, RenderTarget2D, 1000, 1500 );
 
-    pMeshCube = allocation(pMeshCube, Mesh, cube_vertices, cube_indices, sizeof(cube_vertices), sizeof(cube_indices));
+    allocation(cs_plain_color, CShader, "plain_color_cs");
+    allocation(vs_standard, VShader, "vs_main");
+    allocation(ps_standard, PShader, "ps_main");
+
+    mesh_cube = allocation(mesh_cube, Mesh, cube_vertices, cube_indices, sizeof(cube_vertices), sizeof(cube_indices));
 
     // generic constant buffer
-    device->CreateBuffer(&constant_buffer_desc, NULL, &constants_buffer);
-    inmediate->VSSetConstantBuffers(0, 1, &constants_buffer);
-    inmediate->PSSetConstantBuffers(0, 1, &constants_buffer);
-    inmediate->GSSetConstantBuffers(0, 1, &constants_buffer);
-    inmediate->CSSetConstantBuffers(0, 1, &constants_buffer);
+    allocation(constants_buffer, ConstantBuffer, 64);
+    constants_buffer->attach(0);
 }
 
-static int buf[3] = { 0, 0, 0 };
 float BACKGROUND_COL[4] = { 0.0,0.0,0.0,1.0 };
 
 void loop()
 {
-    buf[0] = frame;
-    buf[1] = width_window;
-    buf[2] = height_window;
-    
-    inmediate->UpdateSubresource(constants_buffer, 0, 0, &buf[0], 0, 0);
+
+    set_cb_framecount( frame );
+    set_cb_rendersize( width_window, height_window );
 
     viewport->set(0.0,0.0, width_window, height_window);
     viewport->use();
@@ -100,12 +128,34 @@ void loop()
     maindepth_texture->clear_depth();
     rendertarget_main->set_rendertarget_and_depth(maindepth_texture);
 
-    inmediate->VSSetShader(vs_standard, nullptr, 0);
-    inmediate->PSSetShader(ps_standard, nullptr, 0);
-    pMeshCube->use();
-    pMeshCube->draw_instanced(1);
+    vs_standard->use();
+    ps_standard->use();
+
+    set_cb_position(0.0, 0.0, 0.0);
+    mesh_cube->use();
+    mesh_cube->draw();
 
     frame++;
+
+#ifdef _DEBUG
+    if (GetAsyncKeyState('R') & 0x8000) // Comprobar si la tecla 'R' está presionada
+    {
+        if (!iskeypressed) // Si la tecla 'R' no ha sido presionada anteriormente
+        {
+            printf(BG_BLUE YELLOW "RECOMPILING SHADERS" RESET "\n");
+
+            cs_plain_color->compile();
+            vs_standard->compile();
+            ps_standard->compile();
+
+            iskeypressed = true; // Establecer como presionada
+        }
+    }
+    else
+    {
+        iskeypressed = false; // Si la tecla no está presionada, resetear el estado
+    }
+#endif
 
 }
 

@@ -42,14 +42,22 @@ float4x4 compute_perspective_matrix(float _fov, float _aspect_ratio, float _znea
 }
 
 //Constant buffer
-int frame;
-int width;
-int height;
+cbuffer constants{
+	float frame;
+	float width;
+	float height;
+		float _padding0;
+	float3 tposition;
+		float _padding1;
+}
 
-#define TIME 0.1*frame
+#define TIME 0.02*frame
 
-static float4x4 view_matrix = compute_view_matrix(float3(0.0,10.0,20.0), float3(0.0,0.0,0.0));
+static float4x4 view_matrix = compute_view_matrix(float3(0.0,1.0,3.0), float3(0.0,0.0,0.0));
 static float4x4 projection_matrix = compute_perspective_matrix(1.0,1.6,0.1,50.0);
+RWTexture2D<float3> g_rwtTexture0;
+
+#ifdef VERTEX_SHADER
 
 struct VS_INPUT {
     float3  position    :   POSITION;
@@ -68,12 +76,9 @@ VS_OUTPUT vs_main(VS_INPUT i)
     VS_OUTPUT o;
 
     float4 local_pos = float4(i.position,1.0);
-
-	float angle = 0.1 * i.instanceid;
-
     local_pos.xz = mul( float2x2( cos(TIME), sin(TIME), -sin(TIME), cos(TIME) ), local_pos.xz );
-	local_pos.xyz += 10.0 * float3( cos( angle ), 0.0, sin(angle) );
-
+    local_pos.xy = mul( float2x2( cos(TIME), sin(TIME), -sin(TIME), cos(TIME) ), local_pos.xy );
+	local_pos.xyz += 0.1 * tposition;
 
     o.position = mul( float4( local_pos.xyz, 1.0 ), view_matrix );
     o.position = mul( o.position, projection_matrix );
@@ -83,17 +88,31 @@ VS_OUTPUT vs_main(VS_INPUT i)
     return o;
 }
 
-float4 ps_main(VS_OUTPUT i) : SV_TARGET
+#endif
+
+#ifdef PIXEL_SHADER
+
+struct PS_INPUT {
+    float4 position : SV_POSITION;
+    float2 texcoord : TEXCOORD0;
+};
+
+float4 ps_main(PS_INPUT i) : SV_TARGET
 {
-    return float4( i.texcoord, 0.0, 1.0 );
+	float fMask = step( length( fmod( 3.0 * i.texcoord.xy, 1.0 ) - 0.5 ), 0.5 );
+    return float4( fMask * float3( 1.0, 1.0, 1.0 ), 1.0 );
 }
 
-RWTexture2D<float3> g_rwtTexture0;
+#endif
+
+#ifdef COMPUTE_SHADER
 [numthreads(8,8,1)]
 void plain_color_cs(uint3 id: SV_DispatchThreadID )
 {
     g_rwtTexture0[ id.xy ] = float3( 1.0 * id.x / width, 1.0 * id.y / height, 0.0 );
 }
+
+#endif
 )raw";
 
 #endif // GENERATED_HEADER_H

@@ -7,7 +7,6 @@ ID3D11RenderTargetView* null_rtv;
 ID3D11Buffer* null_buffer;
 ID3D11InputLayout* common_vertex_layout = NULL;
 UINT common_vertex_layout_stride = 0;
-ID3D11Buffer* constants_buffer;
 
 static float quad_vertices[] = {
     -0.5f,  0.5f, 0.0f, 0.0f, 0.0f , 0.0f, 1.0f, 0.0f,
@@ -183,6 +182,12 @@ struct RenderDepth2D
 
         device->CreateTexture2D(&depthDesc, nullptr, &rendertarget);
 
+#ifdef _DEBUG
+        printf(GREEN "[OK] " WHITE "Depth buffer with size %d x %d successfully created" RESET "\n", _width, _height);
+        printf("\t" CYAN "Depth buffer size %.2f MBytes\n" RESET, _width * _height * 4 / ( 1024.0 * 1024.0 ));
+#endif
+
+
         D3D11_DEPTH_STENCIL_VIEW_DESC dsvDesc = {};
         dsvDesc.Format = DXGI_FORMAT_D32_FLOAT;
         dsvDesc.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
@@ -256,6 +261,12 @@ struct RenderTarget2D
 
 
         device->CreateTexture2D(&textureDesc, nullptr, &rendertarget);
+
+#ifdef _DEBUG
+        printf(GREEN "[OK] " WHITE "Render target 2D with size %d x %d successfully created" RESET "\n", _width, _height);
+        printf("\t" CYAN "Render target 2D size %.2f Mbytes\n" RESET, _width * _height * 16 / (1024.0 * 1024.0 ) );
+#endif
+
         device->CreateRenderTargetView(rendertarget, nullptr, &rtv);
         device->CreateShaderResourceView(rendertarget, nullptr, &srv);
         device->CreateUnorderedAccessView(rendertarget, nullptr, &uav);
@@ -349,6 +360,11 @@ struct RenderTarget3D
 
 
         device->CreateTexture3D(&textureDesc, nullptr, &rendertarget);
+#ifdef _DEBUG
+        printf(GREEN "[OK] " WHITE "Render target 3D with size %d x %d x %d successfully created" RESET "\n", _width, _height, _depth);
+        printf("\t" CYAN "Render target 3D size %.2f Kbytes\n" RESET, _width * _height * _depth * 16 / (1024.0 * 1024.0));
+#endif
+
         device->CreateRenderTargetView(rendertarget, nullptr, &rtv);
         device->CreateShaderResourceView(rendertarget, nullptr, &srv);
         device->CreateUnorderedAccessView(rendertarget, nullptr, &uav);
@@ -401,6 +417,67 @@ struct RenderTarget3D
         inmediate->GenerateMips(srv);
     }
 };
+struct ConstantBuffer {
+
+    ID3D11Buffer* buffer;
+    D3D11_MAPPED_SUBRESOURCE mapped_subresource;
+    int nelements = 0;
+
+    ConstantBuffer(int _size)
+    {
+        D3D11_BUFFER_DESC bufferDesc = {};
+
+        bufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+        bufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        bufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+        // Complete to 16 bytes. Not very dark-programming way
+        bufferDesc.ByteWidth = _size + 0xf & 0xfffffff0;
+
+        device->CreateBuffer(&bufferDesc, nullptr, &buffer);
+        nelements = _size / 4;
+    }
+
+    void attach(int _slot)
+    {
+        inmediate->VSSetConstantBuffers(_slot, 1, &buffer);
+        inmediate->GSSetConstantBuffers(_slot, 1, &buffer);
+        inmediate->PSSetConstantBuffers(_slot, 1, &buffer);
+        inmediate->CSSetConstantBuffers(_slot, 1, &buffer);
+    }
+
+    void map()
+    {
+        inmediate->Map(buffer, 0, D3D11_MAP_WRITE_NO_OVERWRITE, 0, &mapped_subresource);
+    }
+
+    void unmap()
+    {
+        inmediate->Unmap(buffer, 0);
+    }
+
+    void* get_data()
+    {
+        return mapped_subresource.pData;
+    }
+
+    void set_data(void* data)
+    {
+        mapped_subresource.pData = data;
+    }
+
+    void update(void* _source)
+    {
+        inmediate->UpdateSubresource(buffer, 0, 0, _source, 0, 0);
+    }
+
+    void release()
+    {
+        buffer->Release();
+        buffer = nullptr;
+    }
+
+};
 struct Buffer {
 
     ID3D11Buffer* buffer;
@@ -451,6 +528,22 @@ struct Buffer {
             bufferDesc.StructureByteStride = _size_per_element;
 
             device->CreateBuffer(&bufferDesc, nullptr, &buffer);
+
+#ifdef _DEBUG
+            printf(GREEN "[OK] " WHITE "Buffer with %d elements and %d bytes per element successfully created" RESET "\n", _size, _size_per_element);            
+            if (_size * _size_per_element < 500)
+            {
+                printf("\t" CYAN "Buffer size %d bytes\n" RESET, _size * _size_per_element);
+            }
+            if (_size * _size_per_element / 1024.0 < 500)
+            {
+                printf("\t" CYAN "Buffer size %.2f Kbytes\n" RESET, _size * _size_per_element / 1024.0);
+            }
+            else
+            {
+                printf("\t" CYAN "Buffer size %.2f Mbytes\n" RESET, _size * _size_per_element / ( 1024.0 * 1024.0 ) );
+            }
+#endif
 
             D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
             uavDesc.Format = DXGI_FORMAT_UNKNOWN;
@@ -640,6 +733,282 @@ struct SamplerState
         inmediate->CSSetSamplers(_slot, 1, &sampler_state);
     }
 };
+struct VShader
+{
+    ID3D11VertexShader* vs = nullptr;
+    LPCSTR entrypoint;
+
+    void compile()
+    {
+        D3D_SHADER_MACRO defines[] = {
+            { "VERTEX_SHADER", "1" }, // Activa la macro correspondiente (VERTEX_SHADER o PIXEL_SHADER)
+            { NULL, NULL }
+        };
+
+#ifndef _DEBUG
+        hr = D3DCompile(shader_content, sizeof(shader_content), 0, defines, 0, entrypoint, "vs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#else
+        hr = D3DCompileFromFile(L"source.shader", defines, 0, entrypoint, "vs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#endif
+
+        if (FAILED(hr))
+        {
+
+#ifdef _DEBUG
+            if (error_blob != nullptr && error_blob->GetBufferSize() > 0) {
+                const char* errorMessage = static_cast<const char*>(error_blob->GetBufferPointer());
+                const char* lastSlash = strrchr(errorMessage, '\\'); // Para Windows
+                if (!lastSlash) {
+                    lastSlash = strrchr(errorMessage, '/'); // Para Linux/Mac
+                }
+                const char* cleanMessage = lastSlash ? lastSlash + 1 : errorMessage;
+                printf(RED "[ERROR] " WHITE "Vertex shader " BG_RED WHITE "%s" BG_BLACK WHITE " failed at compiling" RESET "\n", entrypoint);
+                printf("\t" BG_RED WHITE "%s" RESET, cleanMessage);
+                printf("\t" YELLOW "Going with fallback shader\n" RESET);
+
+            }
+#endif
+
+            hr = D3DCompile(shader_error, sizeof(shader_error), 0, 0, 0, "vs_error", "vs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+        }
+        else
+        {
+#ifdef _DEBUG
+            printf(GREEN "[OK] " WHITE "Vertex shader " BG_WHITE BLUE "%s" BG_BLACK WHITE " successfully compiled" CYAN RESET "\n", entrypoint);
+#endif
+        }
+
+        hr = device->CreateVertexShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &vs);
+#ifdef _DEBUG
+        printf("\t" CYAN "Shader size %d bytes\n" RESET, blob->GetBufferSize());
+#endif        
+        if (error_blob != 0) error_blob->Release();
+        if (blob != 0) blob->Release();
+    }
+
+    VShader(LPCSTR lEntryPoint)
+    {
+        entrypoint = lEntryPoint;
+        compile();
+    }
+
+    void use()
+    {
+        inmediate->VSSetShader(vs, nullptr, 0);
+    }
+
+    void release()
+    {
+        vs->Release();
+        vs = nullptr;
+    }
+};
+struct PShader
+{
+    ID3D11PixelShader* ps = nullptr;
+    LPCSTR entrypoint;
+
+    void compile()
+    {
+        D3D_SHADER_MACRO defines[] = {
+            { "PIXEL_SHADER", "1" }, // Activa la macro correspondiente (VERTEX_SHADER o PIXEL_SHADER)
+            { NULL, NULL }
+        };
+
+#ifndef _DEBUG
+        hr = D3DCompile(shader_content, sizeof(shader_content), 0, defines, 0, entrypoint, "ps_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#else
+        hr = D3DCompileFromFile(L"source.shader", defines, 0, entrypoint, "ps_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#endif
+
+        if (FAILED(hr))
+        {
+            
+#ifdef _DEBUG
+            if (error_blob != nullptr && error_blob->GetBufferSize() > 0) {
+                const char* errorMessage = static_cast<const char*>(error_blob->GetBufferPointer());
+                const char* lastSlash = strrchr(errorMessage, '\\'); // Para Windows
+                if (!lastSlash) {
+                    lastSlash = strrchr(errorMessage, '/'); // Para Linux/Mac
+                }
+                const char* cleanMessage = lastSlash ? lastSlash + 1 : errorMessage;
+                printf(RED "[ERROR] " WHITE "Pixel shader " BG_RED WHITE "%s" BG_BLACK WHITE " failed at compiling" RESET "\n", entrypoint);
+                printf("\t" BG_RED WHITE "%s" RESET, cleanMessage);
+                printf("\t" YELLOW "Going with fallback shader\n" RESET);
+            }
+#endif
+
+            hr = D3DCompile(shader_error, sizeof(shader_error), 0, 0, 0, "ps_error", "ps_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+        }
+        else
+        {
+#ifdef _DEBUG
+            printf(GREEN "[OK] " WHITE "Pixel shader " BG_WHITE BLUE "%s" BG_BLACK WHITE " successfully compiled" CYAN RESET "\n", entrypoint);
+#endif
+        }
+
+        hr = device->CreatePixelShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &ps);
+#ifdef _DEBUG
+        printf("\t" CYAN "Shader size %d bytes\n" RESET, blob->GetBufferSize());
+#endif 
+        if (error_blob != 0) error_blob->Release();
+        if (blob != 0) blob->Release();
+    }
+
+    PShader(LPCSTR lEntryPoint)
+    {
+        entrypoint = lEntryPoint;
+        compile();
+    }
+
+    void use()
+    {
+        inmediate->PSSetShader(ps, nullptr, 0);
+    }
+
+    void release()
+    {
+        ps->Release();
+        ps = nullptr;
+    }
+};
+struct GShader
+{
+    ID3D11GeometryShader* gs = nullptr;
+    LPCSTR entrypoint;
+
+    void compile()
+    {
+        D3D_SHADER_MACRO defines[] = {
+            { "GEOMETRY_SHADER", "1" }, // Activa la macro correspondiente (VERTEX_SHADER o PIXEL_SHADER)
+            { NULL, NULL }
+        };
+
+#ifndef _DEBUG
+        hr = D3DCompile(shader_content, sizeof(shader_content), 0, defines, 0, entrypoint, "gs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#else
+        hr = D3DCompileFromFile(L"source.shader", defines, 0, entrypoint, "gs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#endif
+
+        if (FAILED(hr))
+        {
+#ifdef _DEBUG
+            if (error_blob != nullptr && error_blob->GetBufferSize() > 0) {
+                const char* errorMessage = static_cast<const char*>(error_blob->GetBufferPointer());
+                const char* lastSlash = strrchr(errorMessage, '\\'); // Para Windows
+                if (!lastSlash) {
+                    lastSlash = strrchr(errorMessage, '/'); // Para Linux/Mac
+                }
+                const char* cleanMessage = lastSlash ? lastSlash + 1 : errorMessage;
+                printf(RED "[ERROR] " WHITE "Geometry shader " BG_RED WHITE "%s" BG_BLACK WHITE " failed at compiling" RESET "\n", entrypoint);
+                printf("\t" BG_RED WHITE "%s" RESET, cleanMessage);
+                printf("\t" YELLOW "Going with fallback shader\n" RESET);
+            }
+#endif
+
+            hr = D3DCompile(shader_error, sizeof(shader_error), 0, 0, 0, "gs_error", "gs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+        }
+        else
+        {
+#ifdef _DEBUG
+            printf(GREEN "[OK] " WHITE "Geometry shader " BG_WHITE BLUE "%s" BG_BLACK WHITE " successfully compiled" CYAN RESET "\n", entrypoint);
+#endif
+        }
+
+        hr = device->CreateGeometryShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &gs);
+#ifdef _DEBUG
+        printf("\t" CYAN "Shader size %d bytes\n" RESET, blob->GetBufferSize());
+#endif 
+        if (error_blob != 0) error_blob->Release();
+        if (blob != 0) blob->Release();
+    }
+
+    GShader(LPCSTR lEntryPoint)
+    {
+        entrypoint = lEntryPoint;
+        compile();
+    }
+
+    void use()
+    {
+        inmediate->GSSetShader(gs, nullptr, 0);
+    }
+
+    void release()
+    {
+        gs->Release();
+        gs = nullptr;
+    }
+};
+struct CShader
+{
+    ID3D11ComputeShader* cs = nullptr;
+    LPCSTR entrypoint;
+
+    void compile()
+    {
+        D3D_SHADER_MACRO defines[] = {
+            { "COMPUTE_SHADER", "1" }, // Activa la macro correspondiente (VERTEX_SHADER o PIXEL_SHADER)
+            { NULL, NULL }
+        };
+
+#ifndef _DEBUG
+        hr = D3DCompile(shader_content, sizeof(shader_content), 0, defines, 0, entrypoint, "cs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#else
+        hr = D3DCompileFromFile(L"source.shader", defines, 0, entrypoint, "cs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+#endif
+
+        if (FAILED(hr))
+        {
+#ifdef _DEBUG
+            if (error_blob != nullptr && error_blob->GetBufferSize() > 0) {
+                const char* errorMessage = static_cast<const char*>(error_blob->GetBufferPointer());
+                const char* lastSlash = strrchr(errorMessage, '\\'); // Para Windows
+                if (!lastSlash) {
+                    lastSlash = strrchr(errorMessage, '/'); // Para Linux/Mac
+                }
+                const char* cleanMessage = lastSlash ? lastSlash + 1 : errorMessage;
+                printf(RED "[ERROR] " WHITE "Compute shader " BG_RED WHITE "%s" BG_BLACK WHITE " failed at compiling" RESET "\n", entrypoint);
+                printf("\t" BG_RED WHITE "%s" RESET, cleanMessage);
+                printf("\t" YELLOW "Going with fallback shader\n" RESET);
+            }
+#endif
+
+            hr = D3DCompile(shader_error, sizeof(shader_error), 0, 0, 0, "cs_error", "cs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
+        }
+        else
+        {
+#ifdef _DEBUG
+            printf(GREEN "[OK] " WHITE "Compute shader " BG_WHITE BLUE "%s" BG_BLACK WHITE " successfully compiled" CYAN RESET "\n", entrypoint);
+#endif
+        }
+
+        hr = device->CreateComputeShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &cs);
+#ifdef _DEBUG
+        printf("\t" CYAN "Shader size %d bytes\n" RESET, blob->GetBufferSize());
+#endif 
+        if (error_blob != 0) error_blob->Release();
+        if (blob != 0) blob->Release();
+    }
+
+    CShader(LPCSTR lEntryPoint)
+    {
+        entrypoint = lEntryPoint;
+        compile();
+    }
+
+    void use()
+    {
+        inmediate->CSSetShader(cs, nullptr, 0);
+    }
+
+    void release()
+    {
+        cs->Release();
+        cs = nullptr;
+    }
+};
+
 void clean_srv(int _slot)
 {
     inmediate->VSSetShaderResources(_slot, 1, &null_srv);
@@ -680,71 +1049,6 @@ void set_renders_and_uavs(ID3D11RenderTargetView* rtvs[], int numrtvs, ID3D11Dep
     inmediate->OMSetRenderTargetsAndUnorderedAccessViews(numrtvs, rtvs, dsv, offsetuavs, numuavs, uavs, 0);
 }
 
-ID3D11VertexShader* CompileVertexShader(LPCSTR lEntryPoint)
-{
-    ID3D11VertexShader* pVS;
-
-#ifndef _DEBUG
-    hr = D3DCompile(shader_content, sizeof(shader_content), 0, 0, 0, lEntryPoint, "vs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#else
-    hr = D3DCompileFromFile(L"source.shader", 0, 0, lEntryPoint, "vs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#endif	
-
-    hr = device->CreateVertexShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &pVS);
-    void* pp = blob->GetBufferPointer(); int ps = blob->GetBufferSize();
-    if (error_blob != 0) error_blob->Release();
-    if (blob != 0) blob->Release();
-    return pVS;
-}
-ID3D11GeometryShader* CompileGeometryShader(LPCSTR lEntryPoint)
-{
-    ID3D11GeometryShader* pGS;
-
-#ifndef _DEBUG
-    hr = D3DCompile(shader_content, sizeof(shader_content), 0, 0, 0, lEntryPoint, "gs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#else
-    hr = D3DCompileFromFile(L"source.shader", 0, 0, lEntryPoint, "gs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#endif
-
-    hr = device->CreateGeometryShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &pGS);
-    void* pp = blob->GetBufferPointer(); int ps = blob->GetBufferSize();
-    if (error_blob != 0) error_blob->Release();
-    if (blob != 0) blob->Release();
-    return pGS;
-}
-ID3D11PixelShader* CompilePixelShader(LPCSTR lEntryPoint)
-{
-    ID3D11PixelShader* pPS;
-
-#ifndef _DEBUG
-    hr = D3DCompile(shader_content, sizeof(shader_content), 0, 0, 0, lEntryPoint, "ps_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#else
-    hr = D3DCompileFromFile(L"source.shader", 0, 0, lEntryPoint, "ps_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#endif	
-
-    hr = device->CreatePixelShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &pPS);
-    void* pp = blob->GetBufferPointer(); int ps = blob->GetBufferSize();
-    if (error_blob != 0) error_blob->Release();
-    if (blob != 0) blob->Release();
-    return pPS;
-}
-ID3D11ComputeShader* CompileComputeShader(LPCSTR lEntryPoint)
-{
-    ID3D11ComputeShader* pCS;
-
-#ifndef _DEBUG
-    hr = D3DCompile(shader_content, sizeof(shader_content), 0, 0, 0, lEntryPoint, "cs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#else
-    hr = D3DCompileFromFile(L"source.shader", 0, 0, lEntryPoint, "cs_5_0", D3D10_SHADER_DEBUG, 0, &blob, &error_blob);
-#endif	
-
-    hr = device->CreateComputeShader((DWORD*)blob->GetBufferPointer(), blob->GetBufferSize(), NULL, &pCS);
-    void* pp = blob->GetBufferPointer(); int ps = blob->GetBufferSize();
-    if (error_blob != 0) error_blob->Release();
-    if (blob != 0) blob->Release();
-    return pCS;
-}
-
 Viewport* viewport;
 Rasterizer* rasterizer;
 Rasterizer* rasterizer_back;
@@ -762,6 +1066,6 @@ DepthStencil* nowrite_greater_depthstencil;
 DepthStencil* write_greater_depthstencil;
 RenderTarget2D* rendertarget_main;
 RenderDepth2D* maindepth_texture;
-
+ConstantBuffer* constants_buffer;
 
 #endif
