@@ -1,43 +1,4 @@
-﻿#include <d3d11.h>
-#include <d3dcompiler.h>
-
-#include "shader_helper.h"
-
-#ifdef _DEBUG
-	#include <stdio.h>
-	#include <windows.h>
-	
-	//Some definitions for console
-	#define RESET   "\033[0m"
-	#define BLACK   "\033[1;30m"
-	#define RED     "\033[1;31m"
-	#define GREEN   "\033[1;32m"
-	#define YELLOW  "\033[1;33m"
-	#define BLUE    "\033[1;34m"
-	#define MAGENTA "\033[1;35m"
-	#define CYAN    "\033[1;36m"
-	#define WHITE   "\033[1;37m"
-	#define BOLD    "\033[1m"
-
-	// Colores de fondo básicos (ANSI 16 colores)
-	#define BG_BLACK   "\033[40m"
-	#define BG_RED     "\033[41m"
-	#define BG_GREEN   "\033[42m"
-	#define BG_YELLOW  "\033[43m"
-	#define BG_BLUE    "\033[44m"
-	#define BG_MAGENTA "\033[45m"
-	#define BG_CYAN    "\033[46m"
-	#define BG_WHITE   "\033[47m"
-#endif
-
-#ifndef _DEBUG
-    #include "generated_shader.h"
-#endif
-
-#include "libmem.h"
-#include "libdevice.h"
-#include "lib3d.h"
-#include "logic.h"
+﻿#include "common_includes.h"
 
 #ifndef _DEBUG
 void WinMainCRTStartup()
@@ -50,6 +11,65 @@ void WinMainCRTStartup()
         height_window = rect.bottom - rect.top;
     }
 #else
+
+LARGE_INTEGER frequency; 
+LARGE_INTEGER prevTime; 
+int frameCount = 0; 
+double elapsedTime = 0.0; 
+
+void IntToString(int value, char* buffer) {
+	char* p = buffer;
+	int temp = value;
+	int digits = 0;
+
+	do {
+		digits++;
+		temp /= 10;
+	} while (temp);
+
+	p += digits;
+	*p = '\0'; 
+
+	do {
+		*--p = '0' + (value % 10); 
+		value /= 10;
+	} while (value);
+}
+
+void InitTimer() {
+	QueryPerformanceFrequency(&frequency);
+	QueryPerformanceCounter(&prevTime); 
+}
+
+void CalculateFPS() {
+	LARGE_INTEGER currentTime;
+	QueryPerformanceCounter(&currentTime);
+
+	double deltaTime = static_cast<double>(currentTime.QuadPart - prevTime.QuadPart) / frequency.QuadPart;
+	prevTime = currentTime; 
+
+	if (elapsedTime >= 1.0) { 
+		char title[32] = "lazy[I]ntro [ ";
+		IntToString(frameCount, title + 14);
+		title[16] = ' ';
+		title[17] = 'F';
+		title[18] = 'P';
+		title[19] = 'S';
+		title[20] = ' ';
+		title[21] = ']';
+
+		SetWindowText(window_handler, title);
+
+		frameCount = 0;    // Reinicia el contador
+		elapsedTime = 0.0; // Reinicia el tiempo acumulado
+	}
+	else 
+	{
+		frameCount++;           // Incrementa el contador de frames
+		elapsedTime += deltaTime;  // Acumula el tiempo transcurrido
+	}
+}
+
 int WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nFunsterStil)
 {
 	AllocConsole();
@@ -59,20 +79,62 @@ int WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument
 	SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 	freopen("CONOUT$", "w", stdout);
 
-	window_handler = CreateWindowA("edit", 0, WS_POPUP | WS_VISIBLE, 0, 0, width_window, height_window, 0, 0, 0, 0);
+	HICON hIcon = (HICON)LoadImage(NULL, "app.ico", IMAGE_ICON, 0, 0, LR_LOADFROMFILE);
+	WNDCLASS wc = {};
+	wc.hInstance = hThisInstance;
+	wc.lpszClassName = "custom_class";
+	wc.lpfnWndProc = DefWindowProc;
+	wc.hIcon = hIcon;
+	RegisterClass(&wc);
+
+	window_handler = CreateWindowA("custom_class", "lazy[I]ntro", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 200, 200, width_window, height_window, 0, 0, hThisInstance, 0);
+
+	SetWindowLong(window_handler, GWL_STYLE, GetWindowLong(window_handler, GWL_STYLE) & ~WS_THICKFRAME);
+	SetWindowPos(window_handler, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+
+	ShowCursor(true);
+
 	printf(BOLD WHITE "===" BG_BLUE RED "DEBUG lazyIntro" WHITE BG_BLACK "=== \n" RESET);
 #endif
 
     device_creation();
+	ini_3d();
 	preparation();
 
-	do
-	{
-		PeekMessageA(0, 0, 0, 0, PM_REMOVE);
+#ifdef _DEBUG
+
+	InitTimer();
+	MSG msg = { 0 };
+	while (true) {
+		while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+
+			// Detectar si se presiona la tecla ESCAPE
+			if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
+				int result = system("devenv LazyIntro.sln /Build Debug");
+
+				ExitProcess(0);
+			}
+		}
+
+		CalculateFPS();
 		loop();
 		swapchain->Present(1, 0);
 	}
 
-	while (!GetAsyncKeyState(VK_ESCAPE));
+
 	ExitProcess(0);
+
+#else
+	while (!GetAsyncKeyState(VK_ESCAPE))
+	{
+		PeekMessageA(0, 0, 0, 0, PM_REMOVE);
+		loop();
+		swapchain->Present(1, 0);
+	};
+
+	ExitProcess(0);
+#endif
+
 }

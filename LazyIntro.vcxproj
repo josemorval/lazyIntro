@@ -175,12 +175,15 @@
   <ItemGroup>
     <None Include="README.md" />
     <None Include="report.html" />
+    <None Include="source.shader" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="generated_shader.h" />
+    <ClInclude Include="common_includes.h" />
+    <ClInclude Include="logic.h" />
     <ClInclude Include="lib3d.h" />
     <ClInclude Include="libdevice.h" />
     <ClInclude Include="libmem.h" />
-    <ClInclude Include="logic.h" />
     <ClInclude Include="shader_helper.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

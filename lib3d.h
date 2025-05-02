@@ -66,7 +66,6 @@ struct Mesh {
     ID3D11ShaderResourceView* vertex_srv = nullptr;
     ID3D11ShaderResourceView* index_srv = nullptr;
 
-    int vertices_count = 0;
     int indices_count = 0;
 
     unsigned int stride;
@@ -77,7 +76,7 @@ struct Mesh {
         D3D11_BUFFER_DESC vertexBufferDesc = {};
         vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
         vertexBufferDesc.ByteWidth = _vertices_size;
-        vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_SHADER_RESOURCE;
+        vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_SHADER_RESOURCE ;
 
         D3D11_SUBRESOURCE_DATA initData = {};
         initData.pSysMem = _vertices;
@@ -93,11 +92,26 @@ struct Mesh {
         indexData.pSysMem = _indices;
         device->CreateBuffer(&indexBufferDesc, &indexData, &index_buffer);
 
-        vertices_count = _vertices_size / sizeof(float);
         indices_count = _indices_size / sizeof(int);
 
         stride = 8 * sizeof(float);
         offset = 0;
+
+#ifdef _DEBUG
+        printf(GREEN "[OK] " WHITE "Mesh vertex buffer with %d elements and %d bytes per element successfully created" RESET "\n", _vertices_size / stride, stride);
+        if ( _vertices_size < 500)
+        {
+            printf("\t" CYAN "Mesh vertex buffer size %d bytes\n" RESET, _vertices_size);
+        }
+        else if (_vertices_size / 1024.0 < 500)
+        {
+            printf("\t" CYAN "Mesh vertex buffer size %.2f Kbytes\n" RESET, _vertices_size / 1024.0);
+        }
+        else
+        {
+            printf("\t" CYAN "Mesh vertex buffer size %.2f Mbytes\n" RESET, _vertices_size / (1024.0 * 1024.0));
+        }
+#endif
 
         D3D11_SHADER_RESOURCE_VIEW_DESC vertexSRVDesc = {};
         vertexSRVDesc.Format = DXGI_FORMAT_R32_FLOAT; // Ajusta el formato según tus necesidades
@@ -436,6 +450,22 @@ struct ConstantBuffer {
 
         device->CreateBuffer(&bufferDesc, nullptr, &buffer);
         nelements = _size / 4;
+
+#ifdef _DEBUG
+        printf(GREEN "[OK] " WHITE "Constant buffer with %d elements and %d bytes per element successfully created" RESET "\n", nelements, 4);
+        if (_size < 500)
+        {
+            printf("\t" CYAN "Constant buffer size %d bytes\n" RESET, _size);
+        }
+        else if (_size / 1024.0 < 500)
+        {
+            printf("\t" CYAN "Constant buffer size %.2f Kbytes\n" RESET, _size / 1024.0);
+        }
+        else
+        {
+            printf("\t" CYAN "Constant buffer size %.2f Mbytes\n" RESET, _size / (1024.0 * 1024.0));
+        }
+#endif
     }
 
     void attach(int _slot)
@@ -483,9 +513,12 @@ struct Buffer {
     ID3D11Buffer* buffer;
     ID3D11UnorderedAccessView* uav;
     ID3D11ShaderResourceView* srv;
+    int size;
 
     Buffer(int _size, int _size_per_element, bool _cpu_read_access = false, bool _indirect_buffer = false)
     {
+
+        size = _size;
 
         if (_indirect_buffer)
         {
@@ -534,8 +567,7 @@ struct Buffer {
             if (_size * _size_per_element < 500)
             {
                 printf("\t" CYAN "Buffer size %d bytes\n" RESET, _size * _size_per_element);
-            }
-            if (_size * _size_per_element / 1024.0 < 500)
+            }else if (_size * _size_per_element / 1024.0 < 500)
             {
                 printf("\t" CYAN "Buffer size %.2f Kbytes\n" RESET, _size * _size_per_element / 1024.0);
             }
@@ -571,6 +603,11 @@ struct Buffer {
     void attach_uav(int _slot)
     {
         inmediate->CSSetUnorderedAccessViews(_slot, 1, &uav, nullptr);
+    }
+
+    int get_size()
+    {
+        return size;
     }
 
     void release()
@@ -649,7 +686,8 @@ struct AlphaBlending
         blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
         blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
         blend_desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-
+        blend_desc.IndependentBlendEnable = FALSE;
+        blend_desc.AlphaToCoverageEnable = FALSE;
 
         device->CreateBlendState(&blend_desc, &blending);
 
@@ -677,6 +715,8 @@ struct AdditiveBlending
         blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
         blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
         blend_desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+        blend_desc.IndependentBlendEnable = FALSE;
+        blend_desc.AlphaToCoverageEnable = FALSE;
 
 
         device->CreateBlendState(&blend_desc, &blending);
@@ -699,6 +739,17 @@ struct DepthStencil
         depthstencil_desc.DepthWriteMask = _write_mask;
         depthstencil_desc.DepthFunc = _comparison_func;
 
+        depthstencil_desc.StencilEnable = FALSE;
+        depthstencil_desc.StencilReadMask = 0xFF;
+        depthstencil_desc.StencilWriteMask = 0xFF;
+
+        depthstencil_desc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+        depthstencil_desc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+        depthstencil_desc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+        depthstencil_desc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+
+        depthstencil_desc.BackFace = depthstencil_desc.FrontFace;
+
         device->CreateDepthStencilState(&depthstencil_desc, &depth_stencil);
     }
 
@@ -713,14 +764,22 @@ struct SamplerState
 
     SamplerState(D3D11_FILTER _filter, D3D11_TEXTURE_ADDRESS_MODE _adress)
     {
-        D3D11_SAMPLER_DESC sampDesc;
+        D3D11_SAMPLER_DESC sampDesc;  // Inicializa todo a 0
+
         sampDesc.Filter = _filter;
         sampDesc.AddressU = _adress;
         sampDesc.AddressV = _adress;
         sampDesc.AddressW = _adress;
+        sampDesc.MipLODBias = 0.0f;
+        sampDesc.MaxAnisotropy = 1;
         sampDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+        sampDesc.BorderColor[0] = 0.0f;  // Color del borde (RGBA)
+        sampDesc.BorderColor[1] = 0.0f;
+        sampDesc.BorderColor[2] = 0.0f;
+        sampDesc.BorderColor[3] = 0.0f;
         sampDesc.MinLOD = 0;
         sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
 
         device->CreateSamplerState(&sampDesc, &sampler_state);
     }
@@ -997,9 +1056,10 @@ struct CShader
         compile();
     }
 
-    void use()
+    void use(UINT x, UINT y, UINT z)
     {
         inmediate->CSSetShader(cs, nullptr, 0);
+        inmediate->Dispatch(x, y, z);
     }
 
     void release()
@@ -1008,46 +1068,6 @@ struct CShader
         cs = nullptr;
     }
 };
-
-void clean_srv(int _slot)
-{
-    inmediate->VSSetShaderResources(_slot, 1, &null_srv);
-    inmediate->GSSetShaderResources(_slot, 1, &null_srv);
-    inmediate->PSSetShaderResources(_slot, 1, &null_srv);
-    inmediate->CSSetShaderResources(_slot, 1, &null_srv);
-}
-void clean_uav(int _slot)
-{
-    inmediate->CSSetUnorderedAccessViews(_slot, 1, &null_uav, nullptr);
-}
-void clear_blending()
-{
-    inmediate->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
-}
-void clear_depthstencil()
-{
-    inmediate->OMSetDepthStencilState(nullptr, 0);
-}
-void emit_vertex(int _vertexcount, int _instancecount)
-{
-    inmediate->IASetInputLayout(nullptr);
-    inmediate->IASetVertexBuffers(0, 0, nullptr, 0, 0);
-    inmediate->IASetIndexBuffer(0, DXGI_FORMAT_R32_UINT, 0);
-    inmediate->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
-    inmediate->DrawInstanced(_vertexcount, _instancecount, 0, 0);
-}
-void emit_vertex_indirect(Buffer* b)
-{
-    inmediate->IASetInputLayout(nullptr);
-    inmediate->IASetVertexBuffers(0, 0, nullptr, 0, 0);
-    inmediate->IASetIndexBuffer(0, DXGI_FORMAT_R32_UINT, 0);
-    inmediate->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
-    inmediate->DrawInstancedIndirect(b->buffer, 0);
-}
-void set_renders_and_uavs(ID3D11RenderTargetView* rtvs[], int numrtvs, ID3D11DepthStencilView* dsv, ID3D11UnorderedAccessView* uavs[], int offsetuavs, int numuavs)
-{
-    inmediate->OMSetRenderTargetsAndUnorderedAccessViews(numrtvs, rtvs, dsv, offsetuavs, numuavs, uavs, 0);
-}
 
 Viewport* viewport;
 Rasterizer* rasterizer;
@@ -1068,4 +1088,105 @@ RenderTarget2D* rendertarget_main;
 RenderDepth2D* maindepth_texture;
 ConstantBuffer* constants_buffer;
 
+void clean_srv(int _slot)
+{
+    inmediate->VSSetShaderResources(_slot, 1, &null_srv);
+    inmediate->GSSetShaderResources(_slot, 1, &null_srv);
+    inmediate->PSSetShaderResources(_slot, 1, &null_srv);
+    inmediate->CSSetShaderResources(_slot, 1, &null_srv);
+}
+void clean_uav(int _slot)
+{
+    inmediate->CSSetUnorderedAccessViews(_slot, 1, &null_uav, nullptr);
+}
+void clear_blending()
+{
+    inmediate->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
+}
+void clear_depthstencil()
+{
+    inmediate->OMSetDepthStencilState(nullptr, 0);
+}
+
+
+
+void emit_vertex(int _vertexcount, int _instancecount, D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_POINTLIST)
+{
+    inmediate->IASetInputLayout(nullptr);
+    inmediate->IASetVertexBuffers(0, 0, nullptr, 0, 0);
+    inmediate->IASetIndexBuffer(0, DXGI_FORMAT_R32_UINT, 0);
+    inmediate->IASetPrimitiveTopology(topo);
+    inmediate->DrawInstanced(_vertexcount, _instancecount, 0, 0);
+}
+void emit_vertex_indirect(Buffer* b, D3D11_PRIMITIVE_TOPOLOGY topo = D3D11_PRIMITIVE_TOPOLOGY_POINTLIST)
+{
+    inmediate->IASetInputLayout(nullptr);
+    inmediate->IASetVertexBuffers(0, 0, nullptr, 0, 0);
+    inmediate->IASetIndexBuffer(0, DXGI_FORMAT_R32_UINT, 0);
+    inmediate->IASetPrimitiveTopology(topo);
+    inmediate->DrawInstancedIndirect(b->buffer, 0);
+}
+
+
+void set_renders_and_uavs(ID3D11RenderTargetView* rtvs[], int numrtvs, ID3D11DepthStencilView* dsv, ID3D11UnorderedAccessView* uavs[], int offsetuavs, int numuavs)
+{
+    inmediate->OMSetRenderTargetsAndUnorderedAccessViews(numrtvs, rtvs, dsv, offsetuavs, numuavs, uavs, 0);
+}
+
+void ini_3d()
+{
+    //Create vertex layout
+    ID3D11VertexShader* vs = nullptr;
+    ID3DBlob* inputlayoutsignature;
+    D3DCompile(shader_vertex_input_layout_signature, sizeof(shader_vertex_input_layout_signature), 0, 0, 0, "vertex_input_layout_signature", "vs_5_0", D3D10_SHADER_DEBUG, 0, &inputlayoutsignature, nullptr);
+
+    device->CreateVertexShader((void*)(((int*)inputlayoutsignature)[3]), ((int*)inputlayoutsignature)[2], NULL, &vs);
+
+    D3D11_INPUT_ELEMENT_DESC layout[3] =
+    {
+         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+         { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    device->CreateInputLayout(layout, ARRAYSIZE(layout), inputlayoutsignature->GetBufferPointer(), inputlayoutsignature->GetBufferSize(), &common_vertex_layout);
+    UINT numElements = sizeof(layout) / sizeof(layout[0]);
+    common_vertex_layout_stride = 8 * sizeof(float);
+
+    //Create a viewport
+    allocation(viewport, Viewport, width_window, height_window);
+
+    //Create several rasterizers (one of them for wireframe)
+    allocation(rasterizer, Rasterizer);
+    allocation(rasterizer_back, Rasterizer, D3D11_FILL_SOLID, D3D11_CULL_FRONT);
+    allocation(rasterizer_nocull, Rasterizer, D3D11_FILL_SOLID, D3D11_CULL_NONE);
+    allocation(rasterizer_wireframe, Rasterizer, D3D11_FILL_WIREFRAME, D3D11_CULL_NONE);
+
+    //Create samplers and set
+    allocation(linearwrap, SamplerState, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP);
+    allocation(pointwrap, SamplerState, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_WRAP);
+    allocation(linearclamp, SamplerState, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
+    allocation(pointclamp, SamplerState, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_CLAMP);
+
+    linearwrap->set_sampler(0);
+    pointwrap->set_sampler(1);
+    linearclamp->set_sampler(2);
+    pointclamp->set_sampler(3);
+
+    //Create a additive and alpha blending mode 
+    allocation(alpha_blending, AlphaBlending);
+    allocation(additive_blending, AdditiveBlending);
+
+    //Several depth stencil setups (write or not write to depth buffer)
+    allocation(nowrite_depthstencil, DepthStencil, false, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_COMPARISON_LESS_EQUAL);
+    allocation(write_depthstencil, DepthStencil, true, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_COMPARISON_LESS_EQUAL);
+    allocation(nowrite_greater_depthstencil, DepthStencil, false, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_COMPARISON_GREATER_EQUAL);
+    allocation(write_greater_depthstencil, DepthStencil, true, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_COMPARISON_GREATER_EQUAL);
+
+    //Here we take the reference for the backbuffer (to draw the things) and create a depth map
+    allocation(rendertarget_main, RenderTarget2D);
+    rendertarget_main->get_backbuffer();
+
+    allocation(maindepth_texture, RenderDepth2D, width_window, height_window);
+}
 #endif

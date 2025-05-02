@@ -2,15 +2,24 @@
 #define LOGIC_HEADER_H
 
 static int frame = 0;
-static D3D11_BUFFER_DESC constant_buffer_desc = { 256, D3D11_USAGE_DEFAULT, D3D11_BIND_CONSTANT_BUFFER, 0, 0, 0 }; // 256,0,4,0,0,0
+static float BACKGROUND_COL[4] = { 0.0,0.0,0.0,1.0 };
+static int MESHVERTEX_STRUCT_SIZE = 8;
+static int INSTANCEPOINT_STRUCT_SIZE = 14;
 
-CShader* cs_plain_color = NULL;
-VShader* vs_standard = NULL;
-PShader* ps_standard = NULL;
+VShader* vs_standard;
+VShader* vs_instanced_standard;
+VShader* vs_vertexid_standard;
+VShader* vs_vertexid_instanced_standard;
+PShader* ps_standard;
+PShader* ps_ground_particles;
 
+CShader* cs_generate_sphere;
+
+Mesh* mesh_quad;
 Mesh* mesh_cube;
-Buffer* other_buffer;
-RenderTarget2D* other_render;
+
+Buffer* buffer_sphere_vertices;
+Buffer* buffer_sphere_indices;
 
 //Constants buffer helper functions
 void set_cb_framecount(float frame)
@@ -20,7 +29,6 @@ void set_cb_framecount(float frame)
     cb[0] = frame;
     constants_buffer->unmap();
 }
-
 void set_cb_rendersize(float x, float y)
 {
     constants_buffer->map();
@@ -29,8 +37,6 @@ void set_cb_rendersize(float x, float y)
     cb[2] = y;
     constants_buffer->unmap();
 }
-
-
 void set_cb_position(float x, float y, float z)
 {
     constants_buffer->map();
@@ -40,86 +46,154 @@ void set_cb_position(float x, float y, float z)
     cb[6] = z;
     constants_buffer->unmap();
 }
+void set_cb_rotation(float x, float y, float z, float w)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[8] = x;
+    cb[9] = y;
+    cb[10] = z;
+    cb[11] = w;
+    constants_buffer->unmap();
+}
+void set_cb_scale(float x, float y, float z)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[12] = x;
+    cb[13] = y;
+    cb[14] = z;
+    constants_buffer->unmap();
+}
+void set_cb_lightpass(float lightpass)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[15] = lightpass;
+    constants_buffer->unmap();
+}
+
+void set_cb_campos(float x, float y, float z)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[16] = x;
+    cb[17] = y;
+    cb[18] = z;
+    constants_buffer->unmap();
+}
+void set_cb_camview(float x, float y, float z)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[20] = x;
+    cb[21] = y;
+    cb[22] = z;
+    constants_buffer->unmap();
+}
+
+void set_cb_nthreads(float nthreads)
+{
+    constants_buffer->map();
+    float* cb = (float*)constants_buffer->get_data();
+    cb[23] = nthreads;
+    constants_buffer->unmap();
+}
+
+struct ProcMesh
+{
+
+};
+struct Particles
+{
+    CShader* shader;
+    Buffer* points;
+
+    int npoints = 0;
+
+    Particles(LPCSTR _lEntryPoint, int _npoints)
+    {
+        npoints = _npoints;
+        allocation(shader, CShader, _lEntryPoint);
+        allocation(points, Buffer, npoints, INSTANCEPOINT_STRUCT_SIZE * sizeof(float));
+    }
+
+    void update()
+    {
+        set_cb_nthreads((float)npoints);
+        points->attach_uav(2);
+        shader->use(npoints / 64 + 1, 1, 1);
+        clean_uav(2);
+    }
+
+    void draw_mesh(VShader* _vshader, PShader* _pshader, Mesh* _mesh)
+    {
+        _vshader->use();
+        _pshader->use();
+
+        points->attach_srv(2);
+        _mesh->use();
+        _mesh->draw_instanced(npoints);
+        clean_srv(2);
+    }
+};
+
+Particles* particles0;
+Particles* ground_particles;
 
 void preparation()
 {
-    //Create vertex layout
-    ID3D11VertexShader* vs = nullptr;
-    ID3DBlob* inputlayoutsignature;
-    D3DCompile(shader_vertex_input_layout_signature, sizeof(shader_vertex_input_layout_signature), 0, 0, 0, "vertex_input_layout_signature", "vs_5_0", D3D10_SHADER_DEBUG, 0, &inputlayoutsignature, nullptr);
-
-    device->CreateVertexShader((void*)(((int*)inputlayoutsignature)[3]), ((int*)inputlayoutsignature)[2], NULL, &vs);
-
-    D3D11_INPUT_ELEMENT_DESC layout[3] =
-    {
-         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-         { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 }
-    };
-
-    device->CreateInputLayout(layout, ARRAYSIZE(layout), inputlayoutsignature->GetBufferPointer(), inputlayoutsignature->GetBufferSize(), &common_vertex_layout);
-    UINT numElements = sizeof(layout) / sizeof(layout[0]);
-    common_vertex_layout_stride = 8 * sizeof(float);
-
-    //Create a viewport
-    allocation(viewport, Viewport, width_window, height_window);
-
-    //Create several rasterizers (one of them for wireframe)
-    allocation(rasterizer, Rasterizer);
-    allocation(rasterizer_back, Rasterizer, D3D11_FILL_SOLID, D3D11_CULL_FRONT);
-    allocation(rasterizer_nocull, Rasterizer, D3D11_FILL_SOLID, D3D11_CULL_NONE);
-    allocation(rasterizer_wireframe, Rasterizer, D3D11_FILL_WIREFRAME, D3D11_CULL_NONE);
-
-    //Create samplers and set
-    allocation(linearwrap, SamplerState, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP);
-    allocation(pointwrap, SamplerState, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_WRAP);
-    allocation(linearclamp, SamplerState, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP);
-    allocation(pointclamp, SamplerState, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_CLAMP);
-
-    linearwrap->set_sampler(0);
-    pointwrap->set_sampler(1);
-    linearclamp->set_sampler(2);
-    pointclamp->set_sampler(3);
-
-    //Create a additive and alpha blending mode 
-    allocation(alpha_blending, AlphaBlending);
-    allocation(additive_blending, AdditiveBlending);
-
-    //Several depth stencil setups (write or not write to depth buffer)
-    allocation(nowrite_depthstencil, DepthStencil, true, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_COMPARISON_LESS_EQUAL);
-    allocation(write_depthstencil, DepthStencil, true, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_COMPARISON_LESS_EQUAL);
-    allocation(nowrite_greater_depthstencil, DepthStencil, true, D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_COMPARISON_GREATER_EQUAL);
-    allocation(write_greater_depthstencil, DepthStencil, true, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_COMPARISON_GREATER_EQUAL);
-
-    //Here we take the reference for the backbuffer (to draw the things) and create a depth map
-    allocation(rendertarget_main, RenderTarget2D);
-    rendertarget_main->get_backbuffer();
-
-    allocation(maindepth_texture, RenderDepth2D, width_window, height_window);
-
-    allocation(other_buffer, Buffer, 100, 16);
-    allocation(other_render, RenderTarget2D, 1000, 1500 );
-
-    allocation(cs_plain_color, CShader, "plain_color_cs");
     allocation(vs_standard, VShader, "vs_main");
+    allocation(vs_instanced_standard, VShader, "vs_instanced_main");
+    allocation(vs_vertexid_standard, VShader, "vs_vertexid_main");
+    allocation(vs_vertexid_instanced_standard, VShader, "vs_vertexid_instanced_main");
     allocation(ps_standard, PShader, "ps_main");
+    allocation(ps_ground_particles, PShader, "ps_ground_particles");
 
-    mesh_cube = allocation(mesh_cube, Mesh, cube_vertices, cube_indices, sizeof(cube_vertices), sizeof(cube_indices));
+    allocation(mesh_cube, Mesh, cube_vertices, cube_indices, sizeof(cube_vertices), sizeof(cube_indices));
+    allocation(mesh_quad, Mesh, quad_vertices, quad_indices, sizeof(quad_vertices), sizeof(quad_indices));
+
+    allocation(cs_generate_sphere, CShader, "cs_generate_sphere");
+    allocation(buffer_sphere_vertices, Buffer, 1000, MESHVERTEX_STRUCT_SIZE * sizeof(float));
+    allocation(buffer_sphere_indices, Buffer, 1000 * 6, sizeof(float));
+
+    buffer_sphere_vertices->attach_uav(0);
+    buffer_sphere_indices->attach_uav(1);
+    cs_generate_sphere->use(buffer_sphere_vertices->get_size(), 1, 1);
+    clean_uav(0);
+    clean_uav(1);
+
+    allocation(particles0, Particles, "cs_rotating_cubes", 1);
+    allocation(ground_particles, Particles, "cs_ground_particles", 2500);
 
     // generic constant buffer
-    allocation(constants_buffer, ConstantBuffer, 64);
+    allocation(constants_buffer, ConstantBuffer, 256);
     constants_buffer->attach(0);
+
 }
 
-float BACKGROUND_COL[4] = { 0.0,0.0,0.0,1.0 };
+void compute_scene()
+{
+
+}
+
+void render_scene()
+{
+
+}
 
 void loop()
 {
+    //Initialize
+    set_cb_framecount(frame);
+    set_cb_rendersize(width_window, height_window);
+    set_cb_position(0.0, 0.0, 0.0);
+    set_cb_rotation(0.0, 0.0, 1.0, 0.0);
+    set_cb_scale(1.0, 1.0, 1.0);
+    set_cb_campos(10.0, 5.0, 10.0);
+    set_cb_camview(0.0, 0.0, 0.0);
 
-    set_cb_framecount( frame );
-    set_cb_rendersize( width_window, height_window );
-
-    viewport->set(0.0,0.0, width_window, height_window);
+    viewport->set(0.0, 0.0, width_window, height_window);
     viewport->use();
     rasterizer->use();
     write_depthstencil->use();
@@ -128,28 +202,44 @@ void loop()
     maindepth_texture->clear_depth();
     rendertarget_main->set_rendertarget_and_depth(maindepth_texture);
 
-    vs_standard->use();
-    ps_standard->use();
 
-    set_cb_position(0.0, 0.0, 0.0);
-    mesh_cube->use();
-    mesh_cube->draw();
+    particles0->update();
+    particles0->draw_mesh(vs_instanced_standard,ps_standard, mesh_cube);
+
+    ground_particles->update();
+    ground_particles->draw_mesh(vs_instanced_standard, ps_ground_particles, mesh_quad);
+
+    /*
+    buffer_sphere_vertices->attach_srv(0);
+    buffer_sphere_indices->attach_srv(1);
+    buffer_instance_points->attach_srv(2);
+    emit_vertex(6 * max_size_buffer_sphere, 10, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    clean_srv(0);
+    clean_srv(1);
+    clean_srv(2);
+    */
 
     frame++;
 
 #ifdef _DEBUG
-    if (GetAsyncKeyState('R') & 0x8000) // Comprobar si la tecla 'R' está presionada
+    if (GetAsyncKeyState(VK_LSHIFT) & 0x8000) // Comprobar si la tecla 'R' está presionada
     {
+        /*
         if (!iskeypressed) // Si la tecla 'R' no ha sido presionada anteriormente
         {
             printf(BG_BLUE YELLOW "RECOMPILING SHADERS" RESET "\n");
 
-            cs_plain_color->compile();
             vs_standard->compile();
+            vs_instanced_standard->compile();
+            vs_vertexid_standard->compile();
+            vs_vertexid_instanced_standard->compile();
             ps_standard->compile();
+            cs_generate_sphere->compile();
+            cs_scatter_points->compile();
 
             iskeypressed = true; // Establecer como presionada
         }
+        */
     }
     else
     {

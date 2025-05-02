@@ -1,4 +1,4 @@
-#ifndef LIBNEM_HEADER_H
+#ifndef LIBMEM_HEADER_H
 #define LIBMEM_HEADER_H
 
 static char static_memory[32 * 1024 * 1024];

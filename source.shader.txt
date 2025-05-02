@@ -1,7 +1,3 @@
-#ifndef GENERATED_HEADER_H
-#define GENERATED_HEADER_H
-
-const char shader_content[] = R"raw(
 float3 hash33(uint3 x)
 {
 	const uint k = 1103515245U;
@@ -104,10 +100,6 @@ cbuffer constants : register(b0)
 	float4 trotation;
 	float3 tscale;
 	float lightpass;
-	float3 campos;
-	float _padding2;
-	float3 camview;
-	float nthreads;
 }
 
 struct MeshVertex
@@ -136,13 +128,18 @@ StructuredBuffer<MeshVertex> bMeshVertex : register(t0);
 StructuredBuffer<uint> bMeshIndices : register(t1);
 StructuredBuffer<InstancePoint> bBufferInstancePoints : register(t2);
 
+#define TIME 0.01*frame
+
 static float4x4 view_matrix()
 {
-	return compute_view_matrix(campos, camview);
+	return compute_view_matrix(float3(4.0 * cos(TIME), 3.0, 4.0 * sin(TIME)), float3(0.0, 0.0, 0.0));
 }
 
 static float4x4 projection_matrix()
 {
+
+	//Orthographic projection
+	//compute_orthographic_matrix(177.0 * 0.2, 100.0 * 0.2, 0.001, 1000.0))
 	return compute_perspective_matrix(1.0, 1.77, 0.1, 50.0);
 }
 
@@ -181,8 +178,8 @@ VS_OUTPUT vs_main(VS_INPUT i)
 	const float4 pos_in_local = float4(tscale * i.position, 1.0);
 	const float4 pos_in_world = float4(tposition, 0.0) + mul(rot_matrix, pos_in_local);
 
-	const float4 pos_in_view = mul(view_matrix(), pos_in_world);
-	o.clip_position = mul(projection_matrix(), pos_in_view);
+	o.clip_position = mul(view_matrix(), pos_in_world);
+	o.clip_position = mul(projection_matrix(), o.clip_position);
 	o.normal_in_world = mul(rot_matrix, (i.isfrontface ? -1.0 : 1.0) * i.normal).xyz;
 	o.texcoord = i.texcoord;
 
@@ -201,8 +198,8 @@ VS_OUTPUT vs_instanced_main(VS_INPUT i)
 	const float4 pos_in_local = float4(ip.scale * i.position, 1.0);
 	const float4 pos_in_world = float4(ip.position, 0.0) + mul(rot_matrix, pos_in_local);
 
-	const float4 pos_in_view = mul(view_matrix(), pos_in_world);
-	o.clip_position = mul(projection_matrix(), pos_in_view);
+	o.clip_position = mul(view_matrix(), pos_in_world);
+	o.clip_position = mul(projection_matrix(), o.clip_position);
 	o.normal_in_world = mul(rot_matrix, (i.isfrontface ? -1.0 : 1.0) * i.normal).xyz;
 	o.texcoord = i.texcoord;
 
@@ -224,8 +221,8 @@ VS_OUTPUT vs_vertexid_main(VS_INPUT_VERTEXID i)
 	const float4 pos_in_local = float4(tscale * iposition, 1.0);
 	const float4 pos_in_world = float4(tposition, 0.0) + mul(rot_matrix, pos_in_local);
 
-	const float4 pos_in_view = mul(view_matrix(), pos_in_world);
-	o.clip_position = mul(projection_matrix(), pos_in_view);
+	o.clip_position = mul(view_matrix(), pos_in_world);
+	o.clip_position = mul(projection_matrix(), o.clip_position);
 	o.normal_in_world = mul(rot_matrix, (i.isfrontface ? 1.0 : -1.0) * inormal).xyz;
 	o.texcoord = itexcoord;
 
@@ -249,8 +246,8 @@ VS_OUTPUT vs_vertexid_instanced_main(VS_INPUT_VERTEXID i)
 	const float4 pos_in_local = float4(ip.scale * iposition, 1.0);
 	const float4 pos_in_world = float4(bBufferInstancePoints[i.instanceid].position, 0.0) + mul(rot_matrix, pos_in_local);
 
-	const float4 pos_in_view = mul(view_matrix(), pos_in_world);
-	o.clip_position = mul(projection_matrix(), pos_in_view);
+	o.clip_position = mul(view_matrix(), pos_in_world);
+	o.clip_position = mul(projection_matrix(), o.clip_position);
 	o.normal_in_world = mul(rot_matrix, inormal).xyz;
 	o.texcoord = itexcoord;
 
@@ -274,11 +271,6 @@ float4 ps_main(PS_INPUT i) : SV_TARGET
 	float mask = clamp(smoothstep(0.0, 1.0, dot(normalize(float3(-1.0, 1.0, 1.0)), nor)), 0.0, 1.0);
 	float3 col = float3(0.5, 0.5, 0.5) + 0.6 * float3(0.8, 0.9, 1.0) * mask;
 	return float4(0.5 + 0.5 * nor, 1.0);
-}
-
-float4 ps_ground_particles(PS_INPUT i) : SV_TARGET
-{
-	return float4(1.0, 0.0, 0.0, 1.0);
 }
 
 #endif
@@ -333,50 +325,23 @@ void cs_generate_sphere(uint3 id: SV_DispatchThreadID)
 }
 
 
+
 [numthreads(64, 1, 1)]
-void cs_rotating_cubes(uint3 id: SV_DispatchThreadID)
+void cs_cubes_points(uint3 id: SV_DispatchThreadID)
 {
-	if (id.x > nthreads) return;
+	if (id.x > 20.0) return;
 
 	InstancePoint ip;
 	ip = rwbBufferInstancePoints[id.x];
 
-	float fNormalizedId = id.x / (nthreads - 1.0 );
-	float fT = 0.03 * frame;
+	float fNormalizedId = id.x / 20.0;
 
-	float fRotCube = 3.14159 / 2.0 * smoothstep( 0.0, 1.0, frac(fT));
-	float fHeight = 0.5 * sin( 3.14159 * frac(fT));
-
-	ip.position = float3(0.0, fHeight, 0.0);
-	ip.rotation = float4(1.0, 0.0, 0.0, fRotCube);
-	ip.scale = float3(2.0, 2.0, 2.0);
+	ip.position = 10.0 * float3(cos(2.0 * 3.14159 * fNormalizedId), 0.0, sin(2.0 * 3.14159 * fNormalizedId));
+	ip.rotation = float4(0.0, 0.0, 1.0, 0.0);
+	ip.scale = float3(1.0, 3.0, 1.0);
 
 	rwbBufferInstancePoints[id.x] = ip;
+
 }
-
-[numthreads(64, 1, 1)]
-void cs_ground_particles(uint3 id: SV_DispatchThreadID)
-{
-	if (id.x > nthreads) return;
-
-	InstancePoint ip;
-	ip = rwbBufferInstancePoints[id.x];
-
-	float fNormalizedId = id.x / (nthreads - 1.0);
-	float2 vIndex2D = float2(id.x % 100. id.x / 100);
-	float fT = 0.03 * frame;
-
-	float3 vPosition = float3(vIndex2D.x, 0.0, vIndex2D.z);
-
-	ip.position = vPosition;
-	ip.rotation = float4(1.0, 0.0, 0.0, fRotCube);
-	ip.scale = float3(1.0, 1.0, 1.0);
-
-	rwbBufferInstancePoints[id.x] = ip;
-}
-
 
 #endif
-)raw";
-
-#endif // GENERATED_HEADER_H

@@ -1,8 +1,8 @@
 #ifndef LIBDEVICE_HEADER_H
 #define LIBDEVICE_HEADER_H
 
-static int width_window = 600;
-static int height_window = 400;
+static int width_window = 1280;
+static int height_window = 720;
 static int swapchain_desc[] = { width_window, height_window, 0, 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 0, 1, 0, DXGI_USAGE_RENDER_TARGET_OUTPUT, 1, 0, 1, 0, 0 };
 
 HWND window_handler;
